@@ -1,0 +1,2 @@
+# system_watcher_plugin
+A plugin for PS3™ Pro that mimics the DEX xmb_plugin.sprx, displaying the system's IP address on the XMB and showing messages based on the system’s CPU/GPU clock state. It also detects whether the current online game server is PlayStation Network or a revived server, using DNS settings to determine the server name.
