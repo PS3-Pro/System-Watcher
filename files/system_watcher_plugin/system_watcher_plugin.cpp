@@ -59,182 +59,80 @@ ClockState GetClockState()
 }
 
 // ===== HELPERS =====
-sys_prx_id_t GetModuleHandle(const char* moduleName)
+sys_prx_id_t GetModuleHandle(const char* moduleName) { return (moduleName) ? sys_prx_get_module_id_by_name(moduleName, 0, nullptr) : sys_prx_get_my_module_id(); }
+sys_prx_module_info_t GetModuleInfo(sys_prx_id_t handle) { sys_prx_module_info_t info{}; static sys_prx_segment_info_t segments[10]{}; static char filename[SYS_PRX_MODULE_FILENAME_SIZE]{}; stdc::memset(segments, 0, sizeof(segments)); stdc::memset(filename, 0, sizeof(filename)); info.size = sizeof(info); info.segments = segments; info.segments_num = sizeof(segments) / sizeof(sys_prx_segment_info_t); info.filename = filename; info.filename_size = sizeof(filename); sys_prx_get_module_info(handle, 0, &info); return info; }
+std::string GetModuleFilePath(const char* moduleName) { sys_prx_module_info_t info = GetModuleInfo(GetModuleHandle(moduleName)); return std::string(info.filename); }
+std::string RemoveBaseNameFromPath(const std::string& filePath) { size_t lastPath = filePath.find_last_of("/"); if (lastPath == std::string::npos) return filePath; return filePath.substr(0, lastPath); }
+std::string GetCurrentDir() { static std::string cachedModulePath; if (cachedModulePath.empty()) { std::string path = RemoveBaseNameFromPath(GetModuleFilePath(nullptr)); path += "/"; cachedModulePath = path; } return cachedModulePath; }
+bool FileExists(const char* filePath) { CellFsStat stat; if (cellFsStat(filePath, &stat) == CELL_FS_SUCCEEDED) return (stat.st_mode & CELL_FS_S_IFREG); return false; }
+bool ReadFile(const char* filePath, void* data, size_t size) { int fd; if (cellFsOpen(filePath, CELL_FS_O_RDONLY, &fd, nullptr, 0) == CELL_FS_SUCCEEDED) { cellFsLseek(fd, 0, CELL_FS_SEEK_SET, nullptr); cellFsRead(fd, data, size, nullptr); cellFsClose(fd); return true; } return false; }
+bool ReplaceStr(std::wstring& str, const std::wstring& from, const std::string& to) { size_t startPos = str.find(from); if (startPos == std::wstring::npos) return false; str.replace(startPos, from.length(), std::wstring(to.begin(), to.end())); return true; }
+
+bool IsIpTextEnabled()
 {
-	return (moduleName) ? sys_prx_get_module_id_by_name(moduleName, 0, nullptr) : sys_prx_get_my_module_id();
-}
-
-sys_prx_module_info_t GetModuleInfo(sys_prx_id_t handle)
-{
-	sys_prx_module_info_t info{};
-	static sys_prx_segment_info_t segments[10]{};
-	static char filename[SYS_PRX_MODULE_FILENAME_SIZE]{};
-
-	stdc::memset(segments, 0, sizeof(segments));
-	stdc::memset(filename, 0, sizeof(filename));
-
-	info.size = sizeof(info);
-	info.segments = segments;
-	info.segments_num = sizeof(segments) / sizeof(sys_prx_segment_info_t);
-	info.filename = filename;
-	info.filename_size = sizeof(filename);
-
-	sys_prx_get_module_info(handle, 0, &info);
-	return info;
-}
-
-std::string GetModuleFilePath(const char* moduleName)
-{
-	sys_prx_module_info_t info = GetModuleInfo(GetModuleHandle(moduleName));
-	return std::string(info.filename);
-}
-
-std::string RemoveBaseNameFromPath(const std::string& filePath)
-{
-	size_t lastPath = filePath.find_last_of("/");
-	if (lastPath == std::string::npos)
-		return filePath;
-	return filePath.substr(0, lastPath);
-}
-
-std::string GetCurrentDir()
-{
-	static std::string cachedModulePath;
-	if (cachedModulePath.empty())
-	{
-		std::string path = RemoveBaseNameFromPath(GetModuleFilePath(nullptr));
-		path += "/";
-		cachedModulePath = path;
-	}
-	return cachedModulePath;
-}
-
-bool FileExists(const char* filePath)
-{
-	CellFsStat stat;
-	if (cellFsStat(filePath, &stat) == CELL_FS_SUCCEEDED)
-	{
-		return (stat.st_mode & CELL_FS_S_IFREG);
-	}
-	return false;
-}
-
-bool ReadFile(const char* filePath, void* data, size_t size)
-{
+	const char* toggleFilePath = "/dev_flash/vsh/resource/AAA/system_ip_plugin.sprx";
 	int fd;
-	if (cellFsOpen(filePath, CELL_FS_O_RDONLY, &fd, nullptr, 0) == CELL_FS_SUCCEEDED)
+	if (cellFsOpen(toggleFilePath, CELL_FS_O_RDONLY, &fd, nullptr, 0) != CELL_FS_SUCCEEDED)
 	{
-		cellFsLseek(fd, 0, CELL_FS_SEEK_SET, nullptr);
-		cellFsRead(fd, data, size, nullptr);
-		cellFsClose(fd);
 		return true;
 	}
-	return false;
+	char toggleValue = '1';
+	cellFsRead(fd, &toggleValue, 1, nullptr);
+	cellFsClose(fd);
+	return (toggleValue != '0');
 }
 
-bool ReplaceStr(std::wstring& str, const std::wstring& from, const std::string& to)
-{
-	size_t startPos = str.find(from);
-	if (startPos == std::wstring::npos)
-		return false;
-	str.replace(startPos, from.length(), std::wstring(to.begin(), to.end()));
-	return true;
-}
-
-// ===== GLOBAL Variables =====
+// ===== GLOBALS =====
 bool gIsDebugXmbPlugin{ false };
 wchar_t gIpBuffer[512]{0};
 paf::View* xmb_plugin{};
 paf::View* system_plugin{};
 paf::PhWidget* page_xmb_indicator{};
 paf::PhWidget* page_notification{};
-
-
-//ip_text.off Cache
 bool g_isIpTextDisabled = false;
 uint64_t g_lastOffFileCheckTime = 0;
-constexpr uint64_t OFF_FILE_CHECK_INTERVAL_US = 2000000;
-
-// Clock Cache
+constexpr uint64_t OFF_FILE_CHECK_INTERVAL_US = 200000;
 ClockState g_cachedClockState = CLOCK_STANDARD;
 uint64_t g_lastClockCheckTime = 0;
-constexpr uint64_t CLOCK_CHECK_INTERVAL_US = 5000000; // 5 seconds
-
-// IP Cache
+constexpr uint64_t CLOCK_CHECK_INTERVAL_US = 5000000;
 std::wstring g_cachedIpText;
 uint64_t g_lastIpTextCheckTime = 0;
-constexpr uint64_t IP_TEXT_CHECK_INTERVAL_US = 3000000; // 3 seconds
-
-float EaseInOut(float t)
-{
-	if (t < 0.5f)
-		return 16.0f * t * t * t * t * t;
-
-	float f = -2.0f * t + 2.0f;
-	return 1.0f - (f * f * f * f * f) * 0.5f;
-}
-
-enum AnimationState
-{
-	FADING_OUT,
-	INVISIBLE,
-	FADING_IN,
-	VISIBLE
-};
+constexpr uint64_t IP_TEXT_CHECK_INTERVAL_US = 3000000;
+enum AnimationState { FADING_OUT, INVISIBLE, FADING_IN, VISIBLE };
 AnimationState g_animationState = FADING_IN;
 uint64_t g_animationStateChangeTime_us = 0;
-
-constexpr uint64_t FADE_DURATION_US = 800000;      // 800ms
-constexpr uint64_t VISIBLE_DURATION_US = 25000;     // 25ms
-constexpr uint64_t INVISIBLE_DURATION_US = 600000;  // 600ms
-
+constexpr uint64_t FADE_DURATION_US = 800000;
+constexpr uint64_t VISIBLE_DURATION_US = 25000;
+constexpr uint64_t INVISIBLE_DURATION_US = 600000;
 float g_currentPulseAlpha = 0.0f;
-
 bool g_is_hen = false;
 
 bool LoadIpText()
 {
 	const char* ipTextPath = "/dev_flash/vsh/resource/explore/xmb/pro.xml";
 	char fileBuffer[512]{0};
-
-	if (!FileExists(ipTextPath) || !ReadFile(ipTextPath, fileBuffer, sizeof(fileBuffer)))
+	if (!ReadFile(ipTextPath, fileBuffer, sizeof(fileBuffer)))
 		return false;
-
 	stdc::swprintf(gIpBuffer, 512, L"%s", fileBuffer);
-
 	system_plugin = paf::View::Find("system_plugin");
 	if (!system_plugin) return false;
-
 	page_notification = system_plugin->FindWidget("page_notification");
 	if (page_notification && page_notification->FindChild("ip_text", 0) != nullptr)
 		gIsDebugXmbPlugin = true;
-
 	return true;
 }
 
-paf::PhWidget* GetParent()
-{
-	if (!page_xmb_indicator)
-		return nullptr;
-	return page_xmb_indicator->FindChild("indicator", 0);
-}
-
-bool CanCreateIpText()
-{
-	paf::PhWidget* parent = GetParent();
-	return parent ? parent->FindChild("ip_text", 0) == nullptr : false;
-}
+paf::PhWidget* GetParent() { if (!page_xmb_indicator) return nullptr; return page_xmb_indicator->FindChild("indicator", 0); }
+bool CanCreateIpText() { if (g_isIpTextDisabled) return false; paf::PhWidget* parent = GetParent(); return parent ? parent->FindChild("ip_text", 0) == nullptr : false; }
 
 std::wstring GenerateIpText()
 {
+	std::wstring text(gIpBuffer);
 	char ip[16]{0};
 	netctl::netctl_main_9A528B81(16, ip);
-
-	std::wstring text(gIpBuffer);
 	std::wstring systemIpAddress = L"System IP Address: ";
 	std::wstring IpAddress = (strlen(ip) > 0) ? std::wstring(ip, ip + strlen(ip)) : L"0.0.0.0";
 	std::wstring serverName;
-
 	if (IpAddress != L"0.0.0.0") {
 		xsetting_F48C0548_t* net = xsetting_F48C0548();
 		if (net) {
@@ -242,7 +140,6 @@ std::wstring GenerateIpText()
 			net->GetNetworkConfig(&netInfo);
 			std::wstring dnsPrimary(netInfo.primaryDns, netInfo.primaryDns + strlen(netInfo.primaryDns));
 			std::wstring dnsSecondary(netInfo.secondaryDns, netInfo.secondaryDns + strlen(netInfo.secondaryDns));
-
 			if (dnsPrimary == L"185.194.142.4" || dnsSecondary == L"185.194.142.4") serverName = L"PlayStation Online Network Emulated";
 			else if (dnsPrimary == L"51.79.41.185" || dnsSecondary == L"51.79.41.185") serverName = L"PlayStation Online Returnal Games";
 			else if (dnsPrimary == L"146.190.205.197" || dnsSecondary == L"146.190.205.197") serverName = L"PlayStation Reborn";
@@ -260,37 +157,14 @@ std::wstring GenerateIpText()
 			else serverName = L"PlayStation™ Network";
 		}
 	}
-
 	systemIpAddress += IpAddress;
 	text += L"\n";
 	if (!serverName.empty()) text += L"Online Server: " + serverName + L"\n";
 	text += systemIpAddress;
-
 	return text;
 }
 
-void CreateIpText()
-{
-	paf::PhWidget* parent = GetParent();
-	if (!parent) return;
-
-	paf::PhText* ip_text = new paf::PhText(parent, nullptr);
-	if (!ip_text) return;
-
-	ip_text->SetName("ip_text");
-	if (gIsDebugXmbPlugin)
-		ip_text->SetColor({ 1.f, 1.f, 1.f, 0.f });
-	else
-		ip_text->SetColor({ 1.f, 1.f, 1.f, 1.f });
-
-	ip_text->SetStyle(19, 112);
-	ip_text->SetLayoutPos(0x60000, 0x50000, 0, { 820.f, -465.f, 0.f, 0.f });
-	ip_text->SetLayoutStyle(0, 20, 0.f);
-	ip_text->SetLayoutStyle(1, 217, 0.f);
-	ip_text->SetStyle(56, true);
-	ip_text->SetStyle(18, 34);
-	ip_text->SetStyle(49, 2);
-}
+void CreateIpText() { paf::PhWidget* parent = GetParent(); if (!parent) return; paf::PhText* ip_text = new paf::PhText(parent, nullptr); if (!ip_text) return; ip_text->SetName("ip_text"); if (gIsDebugXmbPlugin) ip_text->SetColor({ 1.f, 1.f, 1.f, 0.f }); else ip_text->SetColor({ 1.f, 1.f, 1.f, 1.f }); ip_text->SetStyle(19, 112); ip_text->SetLayoutPos(0x60000, 0x50000, 0, { 820.f, -465.f, 0.f, 0.f }); ip_text->SetLayoutStyle(0, 20, 0.f); ip_text->SetLayoutStyle(1, 217, 0.f); ip_text->SetStyle(56, true); ip_text->SetStyle(18, 34); ip_text->SetStyle(49, 2); }
 
 // ===== HOOK =====
 Detour* pafWidgetDrawThis_Detour;
@@ -301,95 +175,37 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 	sys_time_nsec_t nsec;
 	sys_time_get_current_time(&sec, &nsec);
 	uint64_t currentTime_us = static_cast<uint64_t>(sec)* 1000000ULL + nsec / 1000;
-
-	if ((currentTime_us - g_lastOffFileCheckTime) > OFF_FILE_CHECK_INTERVAL_US)
-	{
-		const char* offFilePath = g_is_hen ? "/dev_flash/hen/toggles/ip_text.off" : "/dev_flash/vsh/resource/AAA/ip_text.off";
-		g_isIpTextDisabled = FileExists(offFilePath);
-		g_lastOffFileCheckTime = currentTime_us;
-	}
-
-	if ((currentTime_us - g_lastIpTextCheckTime) > IP_TEXT_CHECK_INTERVAL_US)
-	{
-		g_cachedIpText = GenerateIpText();
-		g_lastIpTextCheckTime = currentTime_us;
-	}
-
-	if (!g_is_hen && (currentTime_us - g_lastClockCheckTime) > CLOCK_CHECK_INTERVAL_US)
-	{
-		g_cachedClockState = GetClockState();
-		g_lastClockCheckTime = currentTime_us;
-	}
-
-	if (_this)
-	{
+	if ((currentTime_us - g_lastOffFileCheckTime) > OFF_FILE_CHECK_INTERVAL_US) { g_isIpTextDisabled = !IsIpTextEnabled(); g_lastOffFileCheckTime = currentTime_us; }
+	if ((currentTime_us - g_lastIpTextCheckTime) > IP_TEXT_CHECK_INTERVAL_US) { g_cachedIpText = GenerateIpText(); g_lastIpTextCheckTime = currentTime_us; }
+	if (!g_is_hen && (currentTime_us - g_lastClockCheckTime) > CLOCK_CHECK_INTERVAL_US) { g_cachedClockState = GetClockState(); g_lastClockCheckTime = currentTime_us; }
+	if (_this) {
 		const char* widgetName = _this->m_Data.name.c_str();
-
-		if (strncmp(widgetName, "ip_text", 7) == 0)
-		{
+		if (strncmp(widgetName, "ip_text", 7) == 0) {
 			paf::PhText* ip_text = (paf::PhText*)_this;
-
-			if (g_isIpTextDisabled || vshmain::GetCooperationMode() == vshmain::CooperationMode::Game)
-			{
-				ip_text->m_Data.metaAlpha = 0.f;
-			}
-			else
-			{
-				ip_text->SetText(g_cachedIpText, 0);
-				ip_text->m_Data.metaAlpha = 1.f;
-			}
+			if (g_isIpTextDisabled || vshmain::GetCooperationMode() == vshmain::CooperationMode::Game) { ip_text->m_Data.metaAlpha = 0.f; }
+			else { ip_text->m_Data.metaAlpha = 1.f; }
+			ip_text->SetText(g_cachedIpText, 0);
 		}
-
-		if (!g_is_hen)
-		{
-			if (strncmp(widgetName, "pslogo", 6) == 0 ||
-				strncmp(widgetName, "performance_mode_text", 21) == 0 ||
-				strncmp(widgetName, "balanced_mode_text", 18) == 0 ||
-				strncmp(widgetName, "power_saving_mode_text", 22) == 0)
-			{
+		if (!g_is_hen) {
+			if (strncmp(widgetName, "pslogo", 6) == 0 || strncmp(widgetName, "pslogo_ring", 11) == 0 || strncmp(widgetName, "performance_mode_text", 21) == 0 || strncmp(widgetName, "performance_mode_text_glow", 26) == 0 || strncmp(widgetName, "balanced_mode_text", 18) == 0 || strncmp(widgetName, "balanced_mode_text_glow", 23) == 0 || strncmp(widgetName, "power_saving_mode_text", 22) == 0 || strncmp(widgetName, "power_saving_mode_text_glow", 27) == 0) {
 				paf::PhWidget* parent = GetParent();
 				bool parentVisible = parent && parent->m_Data.metaAlpha > 0.1f;
-
-				if (!parentVisible)
-				{
-					_this->m_Data.metaAlpha = 0.f;
-				}
-				else
-				{
+				if (!parentVisible) { _this->m_Data.metaAlpha = 0.f; }
+				else {
 					float pslogoVis = 0.f, perfVis = 0.f, balVis = 0.f, powerVis = 0.f;
-
-					switch (g_cachedClockState)
-					{
-					case CLOCK_OVERCLOCK: pslogoVis = 1.f; perfVis = 1.f; break;
-					case CLOCK_BALANCED:  pslogoVis = 1.f; balVis = 1.f; break;
-					case CLOCK_UNDERCLOCK: pslogoVis = 1.f; powerVis = 1.f; break;
-					default: break;
-					}
-
+					switch (g_cachedClockState) { case CLOCK_OVERCLOCK: pslogoVis = 1.f; perfVis = 1.f; break; case CLOCK_BALANCED:  pslogoVis = 1.f; balVis = 1.f; break; case CLOCK_UNDERCLOCK: pslogoVis = 1.f; powerVis = 1.f; break; default: break; }
 					float pulseAlpha = 0.f;
-					if (pslogoVis > 0.1f)
-					{
+					if (pslogoVis > 0.1f) {
 						uint64_t elapsed_us = currentTime_us - g_animationStateChangeTime_us;
 						float progress = elapsed_us / static_cast<float>(FADE_DURATION_US);
 						if (progress > 1.f) progress = 1.f;
-
-						switch (g_animationState)
-						{
-						case FADING_IN: pulseAlpha = progress;
-							if (elapsed_us >= FADE_DURATION_US) { g_animationState = VISIBLE; g_animationStateChangeTime_us = currentTime_us; }
-							break;
-						case VISIBLE: pulseAlpha = 1.f;
-							if (elapsed_us >= VISIBLE_DURATION_US) { g_animationState = FADING_OUT; g_animationStateChangeTime_us = currentTime_us; }
-							break;
-						case FADING_OUT: pulseAlpha = 1.f - progress;
-							if (elapsed_us >= FADE_DURATION_US) { g_animationState = INVISIBLE; g_animationStateChangeTime_us = currentTime_us; }
-							break;
-						case INVISIBLE: pulseAlpha = 0.f;
-							if (elapsed_us >= INVISIBLE_DURATION_US) { g_animationState = FADING_IN; g_animationStateChangeTime_us = currentTime_us; }
-							break;
+						switch (g_animationState) {
+						case FADING_IN: pulseAlpha = progress; if (elapsed_us >= FADE_DURATION_US) { g_animationState = VISIBLE; g_animationStateChangeTime_us = currentTime_us; } break;
+						case VISIBLE: pulseAlpha = 1.f; if (elapsed_us >= VISIBLE_DURATION_US) { g_animationState = FADING_OUT; g_animationStateChangeTime_us = currentTime_us; } break;
+						case FADING_OUT: pulseAlpha = 1.f - progress; if (elapsed_us >= FADE_DURATION_US) { g_animationState = INVISIBLE; g_animationStateChangeTime_us = currentTime_us; } break;
+						case INVISIBLE: pulseAlpha = 0.f; if (elapsed_us >= INVISIBLE_DURATION_US) { g_animationState = FADING_IN; g_animationStateChangeTime_us = currentTime_us; } break;
 						}
 					}
-
 					if (strncmp(widgetName, "pslogo_ring", 11) == 0) _this->m_Data.colorScaleRGBA.a = pulseAlpha;
 					else if (strncmp(widgetName, "pslogo", 6) == 0) _this->m_Data.colorScaleRGBA.a = pslogoVis;
 					else if (strncmp(widgetName, "performance_mode_text_glow", 26) == 0) _this->m_Data.colorScaleRGBA.a = perfVis * pulseAlpha;
@@ -402,17 +218,15 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 			}
 		}
 	}
-
 	return pafWidgetDrawThis_Detour ? pafWidgetDrawThis_Detour->GetOriginal<int>(_this, r4, r5) : 0;
 }
 
+// ===== INSTALL / REMOVE =====
 void Install()
 {
 	g_is_hen = IsPayloadHen();
-
-	const char* offFilePath = g_is_hen ? "/dev_flash/hen/toggles/ip_text.off" : "/dev_flash/vsh/resource/AAA/ip_text.off";
-	g_isIpTextDisabled = FileExists(offFilePath);
-
+	g_isIpTextDisabled = !IsIpTextEnabled();
+	LoadIpText();
 	pafWidgetDrawThis_Detour = new Detour(((opd_s*)paf::paf_63D446B8)->sub, pafWidgetDrawThis_Hook);
 }
 
