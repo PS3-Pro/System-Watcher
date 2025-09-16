@@ -7,6 +7,7 @@
 #include <string>
 #include <cstring>
 #include <sys/sys_time.h>
+#include <sys/prx.h>
 
 using address_t = char[0x10];
 
@@ -90,8 +91,6 @@ paf::View* system_plugin{};
 paf::PhWidget* page_xmb_indicator{};
 paf::PhWidget* page_notification{};
 bool g_isIpTextDisabled = false;
-uint64_t g_lastOffFileCheckTime = 0;
-constexpr uint64_t OFF_FILE_CHECK_INTERVAL_US = 200000;
 ClockState g_cachedClockState = CLOCK_STANDARD;
 uint64_t g_lastClockCheckTime = 0;
 constexpr uint64_t CLOCK_CHECK_INTERVAL_US = 5000000;
@@ -106,6 +105,15 @@ constexpr uint64_t VISIBLE_DURATION_US = 25000;
 constexpr uint64_t INVISIBLE_DURATION_US = 600000;
 float g_currentPulseAlpha = 0.0f;
 bool g_is_hen = false;
+
+// ===== GAMEBOOT GLOBALS  =====
+bool g_gamebootAnimStarted = false;
+uint64_t g_gamebootAnimStartTime_us = 0;
+bool g_gamebootWidgetSeenThisFrame = false;
+constexpr uint64_t GB_HOLD_DURATION_US = 3600000;
+constexpr uint64_t GB_FADE_OUT_DURATION_US = 2000000;
+constexpr uint64_t GB_FADE_OUT_START_TIME_US = GB_HOLD_DURATION_US;
+constexpr uint64_t GB_ANIMATION_TOTAL_DURATION_US = GB_FADE_OUT_START_TIME_US + GB_FADE_OUT_DURATION_US;
 
 bool LoadIpText()
 {
@@ -152,7 +160,7 @@ std::wstring GenerateIpText()
 			else if (dnsPrimary == L"52.86.120.101" || dnsSecondary == L"52.86.120.101") serverName = L"Destination Home";
 			else if (dnsPrimary == L"45.33.44.103" || dnsSecondary == L"45.33.44.103") serverName = L"Go Central";
 			else if (dnsPrimary == L"198.100.158.95" || dnsSecondary == L"198.100.158.95") serverName = L"Warhawk Revived";
-			else if (dnsPrimary == L"155.248.202.187" || dnsSecondary == L"155.248.202.187") serverName = L"Monster Hunter Frontier: Renewal";
+			else if (dnsPrimary == L"155.248.205.187" || dnsSecondary == L"155.248.202.187") serverName = L"Monster Hunter Frontier: Renewal";
 			else if (dnsPrimary == L"209.74.81.7" || dnsSecondary == L"209.74.81.7") serverName = L"Rocket NET";
 			else serverName = L"PlayStation™ Network";
 		}
@@ -175,37 +183,143 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 	sys_time_nsec_t nsec;
 	sys_time_get_current_time(&sec, &nsec);
 	uint64_t currentTime_us = static_cast<uint64_t>(sec)* 1000000ULL + nsec / 1000;
-	if ((currentTime_us - g_lastOffFileCheckTime) > OFF_FILE_CHECK_INTERVAL_US) { g_isIpTextDisabled = !IsIpTextEnabled(); g_lastOffFileCheckTime = currentTime_us; }
-	if ((currentTime_us - g_lastIpTextCheckTime) > IP_TEXT_CHECK_INTERVAL_US) { g_cachedIpText = GenerateIpText(); g_lastIpTextCheckTime = currentTime_us; }
-	if (!g_is_hen && (currentTime_us - g_lastClockCheckTime) > CLOCK_CHECK_INTERVAL_US) { g_cachedClockState = GetClockState(); g_lastClockCheckTime = currentTime_us; }
-	if (_this) {
+
+	if ((currentTime_us - g_lastIpTextCheckTime) > IP_TEXT_CHECK_INTERVAL_US) {
+		g_cachedIpText = GenerateIpText();
+		g_lastIpTextCheckTime = currentTime_us;
+	}
+
+	if (!g_is_hen && (currentTime_us - g_lastClockCheckTime) > CLOCK_CHECK_INTERVAL_US) {
+		g_cachedClockState = GetClockState();
+		g_lastClockCheckTime = currentTime_us;
+	}
+
+	if (_this)
+	{
 		const char* widgetName = _this->m_Data.name.c_str();
-		if (strncmp(widgetName, "ip_text", 7) == 0) {
+
+		// ===== IP TEXT =====
+		if (strncmp(widgetName, "ip_text", 7) == 0)
+		{
 			paf::PhText* ip_text = (paf::PhText*)_this;
-			if (g_isIpTextDisabled || vshmain::GetCooperationMode() == vshmain::CooperationMode::Game) { ip_text->m_Data.metaAlpha = 0.f; }
-			else { ip_text->m_Data.metaAlpha = 1.f; }
+			if (g_isIpTextDisabled || vshmain::GetCooperationMode() == vshmain::CooperationMode::Game) {
+				ip_text->m_Data.metaAlpha = 0.f;
+			}
+			else {
+				ip_text->m_Data.metaAlpha = 1.f;
+			}
 			ip_text->SetText(g_cachedIpText, 0);
 		}
+
+		// ===== GAMEBOOT ANIMATION =====
+		if (strncmp(widgetName, "enhanced_game_text", 18) == 0)
+		{
+			if (!g_gamebootAnimStarted && !g_is_hen)
+			{
+				g_cachedClockState = GetClockState();
+			}
+
+			bool shouldBeVisibleCondition = !g_is_hen && (g_cachedClockState == CLOCK_OVERCLOCK || g_cachedClockState == CLOCK_BALANCED);
+			float currentAlpha = 0.0f;
+
+			if (shouldBeVisibleCondition)
+			{
+				if (!g_gamebootAnimStarted)
+				{
+					g_gamebootAnimStarted = true;
+					g_gamebootAnimStartTime_us = currentTime_us;
+				}
+
+				uint64_t elapsed_us = currentTime_us - g_gamebootAnimStartTime_us;
+
+				// LÓGICA FINAL: Aparição instantânea (Hold) e depois Fade Out
+				if (elapsed_us < GB_FADE_OUT_START_TIME_US)
+				{
+					// Fase 1: Visível Instantaneamente (Hold)
+					currentAlpha = 1.0f;
+				}
+				else if (elapsed_us < GB_ANIMATION_TOTAL_DURATION_US)
+				{
+					// Fase 2: Fade Out Linear
+					uint64_t fadeOut_elapsed_us = elapsed_us - GB_FADE_OUT_START_TIME_US;
+					currentAlpha = 1.0f - (static_cast<float>(fadeOut_elapsed_us) / GB_FADE_OUT_DURATION_US);
+				}
+				else
+				{
+					// Animação terminada -> resetar para próxima execução
+					currentAlpha = 0.0f;
+					g_gamebootAnimStarted = false;
+				}
+			}
+			else
+			{
+				g_gamebootAnimStarted = false;
+				currentAlpha = 0.0f;
+			}
+
+			if (currentAlpha < 0.0f) currentAlpha = 0.0f;
+			if (currentAlpha > 1.0f) currentAlpha = 1.0f;
+
+			_this->m_Data.metaAlpha = currentAlpha;
+			_this->m_Data.colorScaleRGBA.a = currentAlpha;
+		}
+
+		// ===== CLOCK STATE / LOGOS =====
 		if (!g_is_hen) {
-			if (strncmp(widgetName, "pslogo", 6) == 0 || strncmp(widgetName, "pslogo_ring", 11) == 0 || strncmp(widgetName, "performance_mode_text", 21) == 0 || strncmp(widgetName, "performance_mode_text_glow", 26) == 0 || strncmp(widgetName, "balanced_mode_text", 18) == 0 || strncmp(widgetName, "balanced_mode_text_glow", 23) == 0 || strncmp(widgetName, "power_saving_mode_text", 22) == 0 || strncmp(widgetName, "power_saving_mode_text_glow", 27) == 0) {
+			if (strncmp(widgetName, "pslogo", 6) == 0 || strncmp(widgetName, "pslogo_ring", 11) == 0 ||
+				strncmp(widgetName, "performance_mode_text", 21) == 0 || strncmp(widgetName, "performance_mode_text_glow", 26) == 0 ||
+				strncmp(widgetName, "balanced_mode_text", 18) == 0 || strncmp(widgetName, "balanced_mode_text_glow", 23) == 0 ||
+				strncmp(widgetName, "power_saving_mode_text", 22) == 0 || strncmp(widgetName, "power_saving_mode_text_glow", 27) == 0)
+			{
 				paf::PhWidget* parent = GetParent();
 				bool parentVisible = parent && parent->m_Data.metaAlpha > 0.1f;
-				if (!parentVisible) { _this->m_Data.metaAlpha = 0.f; }
+
+				if (!parentVisible) {
+					_this->m_Data.metaAlpha = 0.f;
+				}
 				else {
 					float pslogoVis = 0.f, perfVis = 0.f, balVis = 0.f, powerVis = 0.f;
-					switch (g_cachedClockState) { case CLOCK_OVERCLOCK: pslogoVis = 1.f; perfVis = 1.f; break; case CLOCK_BALANCED:  pslogoVis = 1.f; balVis = 1.f; break; case CLOCK_UNDERCLOCK: pslogoVis = 1.f; powerVis = 1.f; break; default: break; }
+
+					switch (g_cachedClockState) {
+					case CLOCK_OVERCLOCK: pslogoVis = 1.f; perfVis = 1.f; break;
+					case CLOCK_BALANCED:  pslogoVis = 1.f; balVis = 1.f; break;
+					case CLOCK_UNDERCLOCK: pslogoVis = 1.f; powerVis = 1.f; break;
+					default: break;
+					}
+
 					float pulseAlpha = 0.f;
 					if (pslogoVis > 0.1f) {
 						uint64_t elapsed_us = currentTime_us - g_animationStateChangeTime_us;
 						float progress = elapsed_us / static_cast<float>(FADE_DURATION_US);
 						if (progress > 1.f) progress = 1.f;
+
 						switch (g_animationState) {
-						case FADING_IN: pulseAlpha = progress; if (elapsed_us >= FADE_DURATION_US) { g_animationState = VISIBLE; g_animationStateChangeTime_us = currentTime_us; } break;
-						case VISIBLE: pulseAlpha = 1.f; if (elapsed_us >= VISIBLE_DURATION_US) { g_animationState = FADING_OUT; g_animationStateChangeTime_us = currentTime_us; } break;
-						case FADING_OUT: pulseAlpha = 1.f - progress; if (elapsed_us >= FADE_DURATION_US) { g_animationState = INVISIBLE; g_animationStateChangeTime_us = currentTime_us; } break;
-						case INVISIBLE: pulseAlpha = 0.f; if (elapsed_us >= INVISIBLE_DURATION_US) { g_animationState = FADING_IN; g_animationStateChangeTime_us = currentTime_us; } break;
+						case FADING_IN: pulseAlpha = progress;
+							if (elapsed_us >= FADE_DURATION_US) {
+								g_animationState = VISIBLE;
+								g_animationStateChangeTime_us = currentTime_us;
+							} break;
+
+						case VISIBLE: pulseAlpha = 1.f;
+							if (elapsed_us >= VISIBLE_DURATION_US) {
+								g_animationState = FADING_OUT;
+								g_animationStateChangeTime_us = currentTime_us;
+							} break;
+
+						case FADING_OUT: pulseAlpha = 1.f - progress;
+							if (elapsed_us >= FADE_DURATION_US) {
+								g_animationState = INVISIBLE;
+								g_animationStateChangeTime_us = currentTime_us;
+							} break;
+
+						case INVISIBLE: pulseAlpha = 0.f;
+							if (elapsed_us >= INVISIBLE_DURATION_US) {
+								g_animationState = FADING_IN;
+								g_animationStateChangeTime_us = currentTime_us;
+							} break;
 						}
 					}
+
 					if (strncmp(widgetName, "pslogo_ring", 11) == 0) _this->m_Data.colorScaleRGBA.a = pulseAlpha;
 					else if (strncmp(widgetName, "pslogo", 6) == 0) _this->m_Data.colorScaleRGBA.a = pslogoVis;
 					else if (strncmp(widgetName, "performance_mode_text_glow", 26) == 0) _this->m_Data.colorScaleRGBA.a = perfVis * pulseAlpha;
@@ -218,6 +332,7 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 			}
 		}
 	}
+
 	return pafWidgetDrawThis_Detour ? pafWidgetDrawThis_Detour->GetOriginal<int>(_this, r4, r5) : 0;
 }
 
