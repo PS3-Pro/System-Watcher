@@ -1,4 +1,4 @@
-﻿Build started 16/09/2025 01:25:46.
+﻿Build started 17/09/2025 03:04:41.
      1>Project "C:\Users\conso\OneDrive\Documentos\GitHub\System-Watcher-Plugin\files\system_watcher_plugin\system_watcher_plugin.vcxproj" on node 2 (Build target(s)).
      1>ClCompile:
          system_watcher_plugin.cpp
@@ -10,4 +10,4 @@
 
 Build succeeded.
 
-Time Elapsed 00:00:06.31
+Time Elapsed 00:00:06.64

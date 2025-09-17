@@ -73,13 +73,16 @@ bool IsIpTextEnabled()
 {
 	const char* toggleFilePath = "/dev_flash/vsh/resource/AAA/system_ip_plugin.sprx";
 	int fd;
+
 	if (cellFsOpen(toggleFilePath, CELL_FS_O_RDONLY, &fd, nullptr, 0) != CELL_FS_SUCCEEDED)
 	{
-		return true;
+		return false;
 	}
+
 	char toggleValue = '1';
 	cellFsRead(fd, &toggleValue, 1, nullptr);
 	cellFsClose(fd);
+
 	return (toggleValue != '0');
 }
 
