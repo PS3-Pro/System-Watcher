@@ -175,8 +175,29 @@ std::wstring GenerateIpText()
 	return text;
 }
 
-void CreateIpText() { paf::PhWidget* parent = GetParent(); if (!parent) return; paf::PhText* ip_text = new paf::PhText(parent, nullptr); if (!ip_text) return; ip_text->SetName("ip_text"); if (gIsDebugXmbPlugin) ip_text->SetColor({ 1.f, 1.f, 1.f, 0.f }); else ip_text->SetColor({ 1.f, 1.f, 1.f, 1.f }); ip_text->SetStyle(19, 112); ip_text->SetLayoutPos(0x60000, 0x50000, 0, { 820.f, -465.f, 0.f, 0.f }); ip_text->SetLayoutStyle(0, 20, 0.f); ip_text->SetLayoutStyle(1, 217, 0.f); ip_text->SetStyle(56, true); ip_text->SetStyle(18, 34); ip_text->SetStyle(49, 2); }
+void CreateIpText()
+{
+	if (gIsDebugXmbPlugin)
+		return;
 
+	paf::PhWidget* parent = GetParent();
+	if (!parent)
+		return;
+
+	paf::PhText* ip_text = new paf::PhText(parent, nullptr);
+	if (!ip_text)
+		return;
+
+	ip_text->SetName("ip_text");
+	ip_text->SetColor({ 1.f, 1.f, 1.f, 1.f });
+	ip_text->SetStyle(19, 112);
+	ip_text->SetLayoutPos(0x60000, 0x50000, 0, { 820.f, -465.f, 0.f, 0.f });
+	ip_text->SetLayoutStyle(0, 20, 0.f);
+	ip_text->SetLayoutStyle(1, 217, 0.f);
+	ip_text->SetStyle(56, true);
+	ip_text->SetStyle(18, 34);
+	ip_text->SetStyle(49, 2);
+}
 // ===== HOOK =====
 Detour* pafWidgetDrawThis_Detour;
 
@@ -201,11 +222,13 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 	{
 		const char* widgetName = _this->m_Data.name.c_str();
 
-		// ===== IP TEXT =====
 		if (strncmp(widgetName, "ip_text", 7) == 0)
 		{
 			paf::PhText* ip_text = (paf::PhText*)_this;
-			if (g_isIpTextDisabled || vshmain::GetCooperationMode() == vshmain::CooperationMode::Game) {
+			paf::PhWidget* parent = GetParent();
+			bool isParentVisible = parent && parent->m_Data.metaAlpha > 0.1f;
+
+			if (g_isIpTextDisabled || vshmain::GetCooperationMode() == vshmain::CooperationMode::Game || !isParentVisible) {
 				ip_text->m_Data.metaAlpha = 0.f;
 			}
 			else {
@@ -214,57 +237,56 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 			ip_text->SetText(g_cachedIpText, 0);
 		}
 
-		// ===== GAMEBOOT ANIMATION =====
-		if (strncmp(widgetName, "enhanced_game_text", 18) == 0)
+		// ===== GAMEBOOT ANIMATION  =====
+		if (!g_is_hen)
 		{
-			if (!g_gamebootAnimStarted && !g_is_hen)
-			{
-				g_cachedClockState = GetClockState();
-			}
-
-			bool shouldBeVisibleCondition = !g_is_hen && (g_cachedClockState == CLOCK_OVERCLOCK || g_cachedClockState == CLOCK_BALANCED);
-			float currentAlpha = 0.0f;
-
-			if (shouldBeVisibleCondition)
+			if (strncmp(widgetName, "enhanced_game_text", 18) == 0)
 			{
 				if (!g_gamebootAnimStarted)
 				{
-					g_gamebootAnimStarted = true;
-					g_gamebootAnimStartTime_us = currentTime_us;
+					g_cachedClockState = GetClockState();
 				}
 
-				uint64_t elapsed_us = currentTime_us - g_gamebootAnimStartTime_us;
+				bool shouldBeVisibleCondition = (g_cachedClockState == CLOCK_OVERCLOCK || g_cachedClockState == CLOCK_BALANCED);
+				float currentAlpha = 0.0f;
 
-				// LÓGICA FINAL: Aparição instantânea (Hold) e depois Fade Out
-				if (elapsed_us < GB_FADE_OUT_START_TIME_US)
+				if (shouldBeVisibleCondition)
 				{
-					// Fase 1: Visível Instantaneamente (Hold)
-					currentAlpha = 1.0f;
-				}
-				else if (elapsed_us < GB_ANIMATION_TOTAL_DURATION_US)
-				{
-					// Fase 2: Fade Out Linear
-					uint64_t fadeOut_elapsed_us = elapsed_us - GB_FADE_OUT_START_TIME_US;
-					currentAlpha = 1.0f - (static_cast<float>(fadeOut_elapsed_us) / GB_FADE_OUT_DURATION_US);
+					if (!g_gamebootAnimStarted)
+					{
+						g_gamebootAnimStarted = true;
+						g_gamebootAnimStartTime_us = currentTime_us;
+					}
+
+					uint64_t elapsed_us = currentTime_us - g_gamebootAnimStartTime_us;
+
+					if (elapsed_us < GB_FADE_OUT_START_TIME_US)
+					{
+						currentAlpha = 1.0f;
+					}
+					else if (elapsed_us < GB_ANIMATION_TOTAL_DURATION_US)
+					{
+						uint64_t fadeOut_elapsed_us = elapsed_us - GB_FADE_OUT_START_TIME_US;
+						currentAlpha = 1.0f - (static_cast<float>(fadeOut_elapsed_us) / GB_FADE_OUT_DURATION_US);
+					}
+					else
+					{
+						currentAlpha = 0.0f;
+						g_gamebootAnimStarted = false;
+					}
 				}
 				else
 				{
-					// Animação terminada -> resetar para próxima execução
-					currentAlpha = 0.0f;
 					g_gamebootAnimStarted = false;
+					currentAlpha = 0.0f;
 				}
-			}
-			else
-			{
-				g_gamebootAnimStarted = false;
-				currentAlpha = 0.0f;
-			}
 
-			if (currentAlpha < 0.0f) currentAlpha = 0.0f;
-			if (currentAlpha > 1.0f) currentAlpha = 1.0f;
+				if (currentAlpha < 0.0f) currentAlpha = 0.0f;
+				if (currentAlpha > 1.0f) currentAlpha = 1.0f;
 
-			_this->m_Data.metaAlpha = currentAlpha;
-			_this->m_Data.colorScaleRGBA.a = currentAlpha;
+				_this->m_Data.metaAlpha = currentAlpha;
+				_this->m_Data.colorScaleRGBA.a = currentAlpha;
+			}
 		}
 
 		// ===== CLOCK STATE / LOGOS =====
