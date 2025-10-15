@@ -206,7 +206,7 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 	sys_time_sec_t sec;
 	sys_time_nsec_t nsec;
 	sys_time_get_current_time(&sec, &nsec);
-	uint64_t currentTime_us = static_cast<uint64_t>(sec)* 1000000ULL + nsec / 1000;
+	uint64_t currentTime_us = static_cast<uint64_t>(sec) * 1000000ULL + nsec / 1000;
 
 	if ((currentTime_us - g_lastIpTextCheckTime) > IP_TEXT_CHECK_INTERVAL_US) {
 		g_cachedIpText = GenerateIpText();
@@ -222,7 +222,8 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 	{
 		const char* widgetName = _this->m_Data.name.c_str();
 
-		if (strncmp(widgetName, "ip_text", 7) == 0)
+		// CORREÇÃO: Removido o terceiro argumento '7'
+		if (strcmp(widgetName, "ip_text") == 0)
 		{
 			paf::PhText* ip_text = (paf::PhText*)_this;
 			paf::PhWidget* parent = GetParent();
@@ -240,7 +241,8 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 		// ===== GAMEBOOT ANIMATION  =====
 		if (!g_is_hen)
 		{
-			if (strncmp(widgetName, "enhanced_game_text", 18) == 0)
+			// CORREÇÃO: Removido o terceiro argumento '18'
+			if (strcmp(widgetName, "enhanced_game_text") == 0)
 			{
 				if (!g_gamebootAnimStarted)
 				{
@@ -291,10 +293,11 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 
 		// ===== CLOCK STATE / LOGOS =====
 		if (!g_is_hen) {
-			if (strncmp(widgetName, "pslogo", 6) == 0 || strncmp(widgetName, "pslogo_ring", 11) == 0 ||
-				strncmp(widgetName, "performance_mode_text", 21) == 0 || strncmp(widgetName, "performance_mode_text_glow", 26) == 0 ||
-				strncmp(widgetName, "balanced_mode_text", 18) == 0 || strncmp(widgetName, "balanced_mode_text_glow", 23) == 0 ||
-				strncmp(widgetName, "power_saving_mode_text", 22) == 0 || strncmp(widgetName, "power_saving_mode_text_glow", 27) == 0)
+			// CORREÇÃO: Removidos todos os argumentos numéricos
+			if (strcmp(widgetName, "pslogo") == 0 || strcmp(widgetName, "pslogo_ring") == 0 ||
+				strcmp(widgetName, "performance_mode_text") == 0 || strcmp(widgetName, "performance_mode_text_glow") == 0 ||
+				strcmp(widgetName, "balanced_mode_text") == 0 || strcmp(widgetName, "balanced_mode_text_glow") == 0 ||
+				strcmp(widgetName, "power_saving_mode_text") == 0 || strcmp(widgetName, "power_saving_mode_text_glow") == 0)
 			{
 				paf::PhWidget* parent = GetParent();
 				bool parentVisible = parent && parent->m_Data.metaAlpha > 0.1f;
@@ -345,14 +348,15 @@ int pafWidgetDrawThis_Hook(paf::PhWidget* _this, unsigned int r4, bool r5)
 						}
 					}
 
-					if (strncmp(widgetName, "pslogo_ring", 11) == 0) _this->m_Data.colorScaleRGBA.a = pulseAlpha;
-					else if (strncmp(widgetName, "pslogo", 6) == 0) _this->m_Data.colorScaleRGBA.a = pslogoVis;
-					else if (strncmp(widgetName, "performance_mode_text_glow", 26) == 0) _this->m_Data.colorScaleRGBA.a = perfVis * pulseAlpha;
-					else if (strncmp(widgetName, "performance_mode_text", 21) == 0) _this->m_Data.colorScaleRGBA.a = perfVis;
-					else if (strncmp(widgetName, "balanced_mode_text_glow", 23) == 0) _this->m_Data.colorScaleRGBA.a = balVis * pulseAlpha;
-					else if (strncmp(widgetName, "balanced_mode_text", 18) == 0) _this->m_Data.colorScaleRGBA.a = balVis;
-					else if (strncmp(widgetName, "power_saving_mode_text_glow", 27) == 0) _this->m_Data.colorScaleRGBA.a = powerVis * pulseAlpha;
-					else if (strncmp(widgetName, "power_saving_mode_text", 22) == 0) _this->m_Data.colorScaleRGBA.a = powerVis;
+					// CORREÇÃO: Removidos todos os argumentos numéricos
+					if (strcmp(widgetName, "pslogo_ring") == 0) _this->m_Data.colorScaleRGBA.a = pulseAlpha;
+					else if (strcmp(widgetName, "pslogo") == 0) _this->m_Data.colorScaleRGBA.a = pslogoVis;
+					else if (strcmp(widgetName, "performance_mode_text_glow") == 0) _this->m_Data.colorScaleRGBA.a = perfVis * pulseAlpha;
+					else if (strcmp(widgetName, "performance_mode_text") == 0) _this->m_Data.colorScaleRGBA.a = perfVis;
+					else if (strcmp(widgetName, "balanced_mode_text_glow") == 0) _this->m_Data.colorScaleRGBA.a = balVis * pulseAlpha;
+					else if (strcmp(widgetName, "balanced_mode_text") == 0) _this->m_Data.colorScaleRGBA.a = balVis;
+					else if (strcmp(widgetName, "power_saving_mode_text_glow") == 0) _this->m_Data.colorScaleRGBA.a = powerVis * pulseAlpha;
+					else if (strcmp(widgetName, "power_saving_mode_text") == 0) _this->m_Data.colorScaleRGBA.a = powerVis;
 				}
 			}
 		}
