@@ -9,12 +9,10 @@
 #include <sys/sys_time.h>
 #include <sys/prx.h>
 
-using address_t = char[0x10];
-
 __attribute__((noinline)) uint64_t PeekLv1(uint64_t addr)
 {
-	system_call_1(8, (uint64_t)addr);
-	return_to_user_prog(uint64_t);
+	system_call_1(8, addr);
+	return (uint64_t)p1;
 }
 
 // ===== CLOCK =====
@@ -41,21 +39,13 @@ ClockState GetClockState()
 		return static_cast<int>(clock.mul) * multiplier;
 	};
 
-	int core_val = readClock(GPU_CORE_CLOCK, 50);
-	int rsx_val = readClock(GPU_VRAM_CLOCK, 25);
+	int core = readClock(GPU_CORE_CLOCK, 50);
+	int vram = readClock(GPU_VRAM_CLOCK, 25);
 
-	if (core_val <= 0 || rsx_val <= 0)
-		return CLOCK_ERROR;
-
-	if ((core_val > 500 && rsx_val < 650) || (core_val < 500 && rsx_val > 650))
-		return CLOCK_BALANCED;
-
-	if (core_val > 500 || rsx_val > 650)
-		return CLOCK_OVERCLOCK;
-
-	if (core_val == 500 && rsx_val == 650)
-		return CLOCK_STANDARD;
-
+	if (core <= 0 || vram <= 0) return CLOCK_ERROR;
+	if ((core > 500 && vram < 650) || (core < 500 && vram > 650)) return CLOCK_BALANCED;
+	if (core == 500 && vram == 650) return CLOCK_STANDARD;
+	if (core > 500 || vram > 650)  return CLOCK_OVERCLOCK;
 	return CLOCK_UNDERCLOCK;
 }
 
@@ -65,9 +55,33 @@ sys_prx_module_info_t GetModuleInfo(sys_prx_id_t handle) { sys_prx_module_info_t
 std::string GetModuleFilePath(const char* moduleName) { sys_prx_module_info_t info = GetModuleInfo(GetModuleHandle(moduleName)); return std::string(info.filename); }
 std::string RemoveBaseNameFromPath(const std::string& filePath) { size_t lastPath = filePath.find_last_of("/"); if (lastPath == std::string::npos) return filePath; return filePath.substr(0, lastPath); }
 std::string GetCurrentDir() { static std::string cachedModulePath; if (cachedModulePath.empty()) { std::string path = RemoveBaseNameFromPath(GetModuleFilePath(nullptr)); path += "/"; cachedModulePath = path; } return cachedModulePath; }
-bool FileExists(const char* filePath) { CellFsStat stat; if (cellFsStat(filePath, &stat) == CELL_FS_SUCCEEDED) return (stat.st_mode & CELL_FS_S_IFREG); return false; }
-bool ReadFile(const char* filePath, void* data, size_t size) { int fd; if (cellFsOpen(filePath, CELL_FS_O_RDONLY, &fd, nullptr, 0) == CELL_FS_SUCCEEDED) { cellFsLseek(fd, 0, CELL_FS_SEEK_SET, nullptr); cellFsRead(fd, data, size, nullptr); cellFsClose(fd); return true; } return false; }
-bool ReplaceStr(std::wstring& str, const std::wstring& from, const std::string& to) { size_t startPos = str.find(from); if (startPos == std::wstring::npos) return false; str.replace(startPos, from.length(), std::wstring(to.begin(), to.end())); return true; }
+
+bool FileExists(const char* path)
+{
+	if (!path) return false;
+	CellFsStat s{};
+	return cellFsStat(path, &s) == CELL_FS_SUCCEEDED && (s.st_mode & CELL_FS_S_IFREG);
+}
+
+bool ReadFile(const char* path, void* buffer, size_t size)
+{
+	if (!path || !buffer || size == 0) return false;
+	int fd;
+	if (cellFsOpen(path, CELL_FS_O_RDONLY, &fd, nullptr, 0) != CELL_FS_SUCCEEDED)
+		return false;
+	uint64_t read = 0;
+	cellFsRead(fd, buffer, size, &read);
+	cellFsClose(fd);
+	return read > 0;
+}
+
+bool ReplaceStr(std::wstring& str, const std::wstring& from, const std::wstring& to)
+{
+	size_t pos = str.find(from);
+	if (pos == std::wstring::npos) return false;
+	str.replace(pos, from.length(), to);
+	return true;
+}
 
 bool IsIpTextEnabled()
 {
@@ -143,6 +157,11 @@ std::wstring GenerateIpText()
 	netctl::netctl_main_9A528B81(16, ip);
 	std::wstring systemIpAddress = L"System IP Address: ";
 	std::wstring IpAddress = (strlen(ip) > 0) ? std::wstring(ip, ip + strlen(ip)) : L"0.0.0.0";
+
+	if (IpAddress == L"0.0.0.0") {
+		g_cachedIpText.clear();
+	}
+
 	std::wstring serverName;
 	if (IpAddress != L"0.0.0.0") {
 		xsetting_F48C0548_t* net = xsetting_F48C0548();
@@ -151,27 +170,31 @@ std::wstring GenerateIpText()
 			net->GetNetworkConfig(&netInfo);
 			std::wstring dnsPrimary(netInfo.primaryDns, netInfo.primaryDns + strlen(netInfo.primaryDns));
 			std::wstring dnsSecondary(netInfo.secondaryDns, netInfo.secondaryDns + strlen(netInfo.secondaryDns));
-			if (dnsPrimary == L"185.194.142.4" || dnsSecondary == L"185.194.142.4") serverName = L"PlayStation Online Network Emulated";
-			else if (dnsPrimary == L"51.79.41.185" || dnsSecondary == L"51.79.41.185") serverName = L"PlayStation Online Returnal Games";
-			else if (dnsPrimary == L"146.190.205.197" || dnsSecondary == L"146.190.205.197") serverName = L"PlayStation Reborn";
-			else if (dnsPrimary == L"135.148.144.253" || dnsSecondary == L"135.148.144.253") serverName = L"PlayStation Rewired";
-			else if (dnsPrimary == L"128.140.0.23" || dnsSecondary == L"128.140.0.23") serverName = L"Project Neptune";
-			else if (dnsPrimary == L"45.7.228.197" || dnsSecondary == L"45.7.228.197") serverName = L"Open Spy";
-			else if (dnsPrimary == L"142.93.245.186" || dnsSecondary == L"142.93.245.186") serverName = L"The ArchStones";
-			else if (dnsPrimary == L"188.225.75.35" || dnsSecondary == L"188.225.75.35") serverName = L"WareHouse";
-			else if (dnsPrimary == L"64.20.35.146" || dnsSecondary == L"64.20.35.146") serverName = L"Home Headquarters";
-			else if (dnsPrimary == L"52.86.120.101" || dnsSecondary == L"52.86.120.101") serverName = L"Destination Home";
+			if (dnsPrimary == L"45.7.228.197" || dnsSecondary == L"45.7.228.197") serverName = L"Open Spy";
 			else if (dnsPrimary == L"45.33.44.103" || dnsSecondary == L"45.33.44.103") serverName = L"Go Central";
+			else if (dnsPrimary == L"51.75.22.125" || dnsSecondary == L"51.75.22.125") serverName = L"Reloaded";
+			else if (dnsPrimary == L"51.79.41.185" || dnsSecondary == L"51.79.41.185") serverName = L"PlayStation Online Returnal Games";
+			else if (dnsPrimary == L"52.86.120.101" || dnsSecondary == L"52.86.120.101") serverName = L"Destination Home";
+			else if (dnsPrimary == L"64.20.35.146" || dnsSecondary == L"64.20.35.146") serverName = L"Home Headquarters";
+			else if (dnsPrimary == L"128.140.0.23" || dnsSecondary == L"128.140.0.23") serverName = L"Project Neptune";
+			else if (dnsPrimary == L"135.148.144.253" || dnsSecondary == L"135.148.144.253") serverName = L"PlayStation Rewired";
+			else if (dnsPrimary == L"142.93.245.186" || dnsSecondary == L"142.93.245.186") serverName = L"The ArchStones";
+			else if (dnsPrimary == L"146.190.205.197" || dnsSecondary == L"146.190.205.197") serverName = L"PlayStation Reborn";
+			else if (dnsPrimary == L"152.53.209.191" || dnsSecondary == L"152.53.209.191") serverName = L"Monster Hunter Frontier: Renewal";
+			else if (dnsPrimary == L"185.194.142.4" || dnsSecondary == L"185.194.142.4") serverName = L"PlayStation Online Network Emulated";
+			else if (dnsPrimary == L"188.225.75.35" || dnsSecondary == L"188.225.75.35") serverName = L"WareHouse";
 			else if (dnsPrimary == L"198.100.158.95" || dnsSecondary == L"198.100.158.95") serverName = L"Warhawk Revived";
-			else if (dnsPrimary == L"155.248.205.187" || dnsSecondary == L"155.248.202.187") serverName = L"Monster Hunter Frontier: Renewal";
 			else if (dnsPrimary == L"209.74.81.7" || dnsSecondary == L"209.74.81.7") serverName = L"Rocket NET";
 			else serverName = L"PlayStation™ Network";
 		}
 	}
-	systemIpAddress += IpAddress;
+
 	text += L"\n";
-	if (!serverName.empty()) text += L"Online Server: " + serverName + L"\n";
-	text += systemIpAddress;
+	if (!serverName.empty())
+		text += L"Online Server: " + serverName + L"\n";
+
+	text += L"System IP Address: " + IpAddress;
+
 	return text;
 }
 
@@ -371,6 +394,10 @@ void Install()
 	g_is_hen = IsPayloadHen();
 	g_isIpTextDisabled = !IsIpTextEnabled();
 	LoadIpText();
+
+	g_animationState = FADING_IN;
+	g_animationStateChangeTime_us = 0;
+
 	pafWidgetDrawThis_Detour = new Detour(((opd_s*)paf::paf_63D446B8)->sub, pafWidgetDrawThis_Hook);
 }
 
