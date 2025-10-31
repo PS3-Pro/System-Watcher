@@ -157,11 +157,6 @@ std::wstring GenerateIpText()
 	netctl::netctl_main_9A528B81(16, ip);
 	std::wstring systemIpAddress = L"System IP Address: ";
 	std::wstring IpAddress = (strlen(ip) > 0) ? std::wstring(ip, ip + strlen(ip)) : L"0.0.0.0";
-
-	if (IpAddress == L"0.0.0.0") {
-		g_cachedIpText.clear();
-	}
-
 	std::wstring serverName;
 	if (IpAddress != L"0.0.0.0") {
 		xsetting_F48C0548_t* net = xsetting_F48C0548();
